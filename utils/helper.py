@@ -1,10 +1,19 @@
 from typing import Literal, Union, Callable, Sequence, Any
 from pathlib import Path
-from collections.abc import Iterable
+
+import fitz
+import matplotlib.patches as patches
+import matplotlib.pylab as plt
+from PIL import Image
+
 from langchain_core.documents import Document
 from utils._pypdf import pypdf_loader
-from utils._unstructured import unstructured_loader_api, unstructured_loader_local
-from utils.print import print_unstructured_page, print_pypdf_page
+from utils._unstructured import unstructured_loader
+from utils.print_plot import (
+    print_unstructured_page,
+    print_pypdf_page,
+    plot_pdf_with_boxes,
+)
 
 
 def choose_method(
@@ -13,7 +22,6 @@ def choose_method(
     strategy: Literal["hi_res", "fast"],
     mode: Literal["single", "elements", "paged"],
     partition_via_api: bool,
-    coordinates: bool,
     post_processors: Union[list[Callable[[str], str]], Callable[[str], str], None],
     api_key: str,
 ) -> list[Document]:
@@ -21,23 +29,14 @@ def choose_method(
     if method == "pypdf":
         return pypdf_loader(path=path)
     elif method == "unstructured":
-        if partition_via_api == True or api_key != None:
-            return unstructured_loader_api(
-                path=path,
-                strategy=strategy,
-                mode=mode,
-                partition_via_api=partition_via_api,
-                coordinates=coordinates,
-                post_processors=post_processors,
-                api_key=api_key,
-            )
-        else:
-            return unstructured_loader_local(
-                path=path,
-                strategy=strategy,
-                mode=mode,
-                post_processors=post_processors,
-            )
+        return unstructured_loader(
+            path=path,
+            strategy=strategy,
+            mode=mode,
+            partition_via_api=partition_via_api,
+            post_processors=post_processors,
+            api_key=api_key,
+        )
 
 
 def print_pages(
@@ -68,3 +67,39 @@ def print_pages(
             end_page=end_page,
             show_metadata=show_metadata,
         )
+
+
+# Unstructured Render and Print Specific Page
+def render_page(
+    file_paths: Union[str, Path, list[Path], list[str]],
+    doc_list: list[Document],
+    page_number: int,
+    print_text: bool = False,
+    show_metadata: bool = None,
+):
+    all_pages = load_all_pages(file_paths=file_paths)
+    pdf_page = all_pages[page_number - 1]
+    page_docs = [
+        doc for doc in doc_list if doc.metadata.get("page_number") == page_number
+    ]
+    segments = [doc.metadata for doc in page_docs]
+    plot_pdf_with_boxes(pdf_page=pdf_page, segments=segments)
+    if print_text:
+        print_unstructured_page(
+            docs=doc_list,
+            pages=page_number,
+            show_metadata=show_metadata,
+        )
+
+
+def load_all_pages(
+    file_paths: Union[str, Path, list[str], list[Path]],
+) -> list[fitz.Page]:
+    if isinstance(file_paths, (str, Path)):
+        file_paths = [file_paths]
+    all_pages = []
+    for path in file_paths:
+        doc = fitz.open(str(path))
+        pages = [doc.load_page(i) for i in range(len(doc))]
+        all_pages.extend(pages)
+    return all_pages
